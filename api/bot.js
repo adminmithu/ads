@@ -1219,6 +1219,12 @@ bot.start(async (ctx) => {
     }
 });
 
+// Instant answer to all callback queries to prevent button loading delays / spinning
+bot.on('callback_query', async (ctx, next) => {
+    ctx.answerCbQuery().catch(() => {});
+    return next();
+});
+
 // Inline Action: Main Menu (Back navigation handler)
 bot.action('main_menu', async (ctx) => {
     await ctx.answerCbQuery();
@@ -4644,7 +4650,9 @@ module.exports = async (req, res) => {
                     ]);
                     const hostName = req.headers.host;
                     const webhookUrl = `https://${hostName}/api/bot.js`;
-                    await bot.telegram.setWebhook(webhookUrl);
+                    await bot.telegram.setWebhook(webhookUrl, {
+                        allowed_updates: ['message', 'edited_message', 'channel_post', 'callback_query', 'inline_query', 'my_chat_member', 'chat_member']
+                    });
                     webhookStatus = `Webhook updated to ${webhookUrl}`;
                 } catch (setupErr) {
                     webhookStatus = `Webhook error: ${setupErr.message}`;

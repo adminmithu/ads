@@ -13,7 +13,9 @@ async function setWebhook() {
         { command: 'start', description: 'Start the bot / প্রধান মেনু 🚀' }
     ]);
 
-    const res = await bot.telegram.setWebhook(webhookUrl);
+    const res = await bot.telegram.setWebhook(webhookUrl, {
+        allowed_updates: ['message', 'edited_message', 'channel_post', 'callback_query', 'inline_query', 'my_chat_member', 'chat_member']
+    });
     console.log('SetWebhook Response:', res ? 'SUCCESS ✅' : 'FAILED ❌');
 
     const info = await bot.telegram.getWebhookInfo();
