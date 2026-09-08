@@ -1732,18 +1732,32 @@ bot.action('verify_join', async (ctx) => {
 bot.action('support', async (ctx) => {
     await ctx.answerCbQuery();
     const supportUser = await getCustomText('SUPPORT_USER', '@prime8088');
+    const rawWaNumber = await getCustomText('WHATSAPP_NUMBER', '01864339154');
+    
+    const cleanUsername = supportUser.replace(/^@/, '').trim();
+    const adminUrl = `https://t.me/${cleanUsername}`;
+    
+    const cleanWaNumber = rawWaNumber.replace(/[^0-9]/g, '');
+    const formattedWaNumber = cleanWaNumber.startsWith('88') ? cleanWaNumber : (cleanWaNumber.startsWith('0') ? `88${cleanWaNumber}` : `880${cleanWaNumber}`);
+    const waUrl = `https://wa.me/${formattedWaNumber}`;
+
     const supportText = `📞 *Contact Support / সাহায্য কেন্দ্র* 📞\n` +
-                        `━━━━━━━━━━━━━━━━━━\n` +
-                        `> 👨‍💻 *Admin Username:* ${supportUser}\n` +
-                        `> 📲 *WhatsApp:* \`01864339154\`\n\n` +
-                        `💬 যেকোনো ধরনের সমস্যা বা সাহায্যের জন্য সরাসরি এডমিনের সাথে যোগাযোগ করুন। অথবা সরাসরি নিচের বাটনটি ব্যবহার করে বটে মেসেজ পাঠান।`;
-    return ctx.reply(supportText, {
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard([
-            [Markup.button.callback('✉️ Send Message to Admin', 'open_support_ticket')],
-            [Markup.button.callback('⬅️ Back to Menu', 'main_menu')]
-        ])
-    });
+                        `━━━━━━━━━━━━━━━━━━\n\n` +
+                        `💬 যেকোনো ধরনের সমস্যা বা সাহায্যের জন্য সরাসরি এডমিনের সাথে যোগাযোগ করুন।\n\n` +
+                        `👇 নিচের বাটনগুলোতে ক্লিক করে মেসেজ পাঠান:`;
+                        
+    const keyboard = Markup.inlineKeyboard([
+        [Markup.button.url('👨‍💻 Admin Telegram', adminUrl)],
+        [Markup.button.url('📲 WhatsApp Support', waUrl)],
+        [Markup.button.callback('✉️ Send Message in Bot', 'open_support_ticket')],
+        [Markup.button.callback('⬅️ Back to Menu', 'main_menu')]
+    ]);
+
+    try {
+        return await ctx.editMessageText(supportText, { parse_mode: 'Markdown', ...keyboard });
+    } catch (e) {
+        return await ctx.reply(supportText, { parse_mode: 'Markdown', ...keyboard });
+    }
 });
 
 bot.action('open_support_ticket', async (ctx) => {
@@ -4614,6 +4628,35 @@ async function runExpiryCheck(req, res) {
     }
 }
 
+let lastWebhookSetTime = 0;
+
+async function autoEnsureWebhook(req) {
+    const now = Date.now();
+    // Throttle re-verifying webhook to max once every 3 minutes unless forced
+    if (now - lastWebhookSetTime < 180000) {
+        return "cached_ok";
+    }
+
+    if (req && req.headers && req.headers.host && !req.headers.host.includes('localhost') && !req.headers.host.includes('127.0.0.1')) {
+        try {
+            await bot.telegram.setMyCommands([
+                { command: 'start', description: 'Start the bot / প্রধান মেনু 🚀' }
+            ]);
+            const hostName = req.headers.host;
+            const webhookUrl = `https://${hostName}/api/bot.js`;
+            await bot.telegram.setWebhook(webhookUrl, {
+                allowed_updates: ['message', 'edited_message', 'channel_post', 'callback_query', 'inline_query', 'my_chat_member', 'chat_member']
+            });
+            lastWebhookSetTime = now;
+            return `Webhook auto-healed to ${webhookUrl}`;
+        } catch (setupErr) {
+            console.error("Auto-webhook error:", setupErr.message);
+            return `Webhook error: ${setupErr.message}`;
+        }
+    }
+    return "not_applicable";
+}
+
 // Vercel Serverless Function Handler
 module.exports = async (req, res) => {
     if (req.method === 'POST') {
@@ -4629,6 +4672,9 @@ module.exports = async (req, res) => {
         }
     } else {
         try {
+            // Auto-heal webhook on any incoming GET or Cron ping
+            const autoWebhookRes = await autoEnsureWebhook(req);
+
             const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
             if (url.searchParams.get('cron') === 'expiry_check') {
                 return await runExpiryCheck(req, res);
@@ -4639,28 +4685,12 @@ module.exports = async (req, res) => {
                     await sendFakeSaleToGroup();
                     if (i < count - 1) await new Promise(r => setTimeout(r, 2000));
                 }
-                return res.status(200).json({ status: "success", message: `Fake sale triggered (${count} posts).` });
+                return res.status(200).json({ status: "success", message: `Fake sale triggered (${count} posts).`, autoWebhook: autoWebhookRes });
             }
 
-            let webhookStatus = "not_set";
-            if (req.headers.host && !req.headers.host.includes('localhost') && !req.headers.host.includes('127.0.0.1')) {
-                try {
-                    await bot.telegram.setMyCommands([
-                        { command: 'start', description: 'Start the bot / প্রধান মেনু 🚀' }
-                    ]);
-                    const hostName = req.headers.host;
-                    const webhookUrl = `https://${hostName}/api/bot.js`;
-                    await bot.telegram.setWebhook(webhookUrl, {
-                        allowed_updates: ['message', 'edited_message', 'channel_post', 'callback_query', 'inline_query', 'my_chat_member', 'chat_member']
-                    });
-                    webhookStatus = `Webhook updated to ${webhookUrl}`;
-                } catch (setupErr) {
-                    webhookStatus = `Webhook error: ${setupErr.message}`;
-                }
-            }
             return res.status(200).json({
                 message: 'AdsPower Bot is running successfully!',
-                webhook: webhookStatus
+                webhook: autoWebhookRes
             });
         } catch (err) {
             console.error("GET handler error:", err.message);
@@ -4676,6 +4706,12 @@ bot.catch((err, ctx) => {
 
 // Start persistent launch if run directly (VPS / Local Hosting) with auto-retry
 async function launchWithRetry() {
+    // Safety guard: Never launch long-polling or delete webhooks when running on Vercel environment
+    if (process.env.VERCEL || process.env.VERCEL_ENV) {
+        console.log("Vercel environment detected - Long-polling launch bypassed.");
+        return;
+    }
+
     try {
         try {
             await bot.telegram.deleteWebhook({ drop_pending_updates: true });
