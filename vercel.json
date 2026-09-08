@@ -2,7 +2,7 @@
   "crons": [
     {
       "path": "/api/bot.js?cron=fake_sales",
-      "schedule": "*/5 * * * *"
+      "schedule": "0 * * * *"
     },
     {
       "path": "/api/bot.js?cron=expiry_check",
