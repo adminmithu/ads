@@ -2112,9 +2112,6 @@ async function showAdminManagementMenu(ctx) {
         return;
     }
 
-    const msgText = `🎛️ *Golden Admin Control Panel*\n\n` +
-                    `শুধুমাত্র এডমিন আইডি দিয়ে অ্যাক্সেসযোগ্য। নিচের বাটনগুলো দিয়ে বটের অর্ডারিং, স্ট্যাটাস, ইউজার ব্যান/আনব্যান, ব্যালেন্স এবং কাস্টমাইজেশন নিয়ন্ত্রণ করুন:`;
-
     const searchLabel = await getCustomText('LABEL_ADMIN_SEARCH', '🟦 SEARCH ORDER / USER');
     const vipLabel = await getCustomText('LABEL_ADMIN_VIP', '🟦 TOP VIP BUYERS');
     const backupLabel = await getCustomText('LABEL_ADMIN_BACKUP', '🟦 FULL DB BACKUP (JSON)');
