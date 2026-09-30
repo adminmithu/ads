@@ -7,11 +7,11 @@ function mdToHtml(md) {
     if (!md) return '';
     let str = md.toString();
 
-    // 0. Stash existing <tg-emoji> tags before escaping
-    const emojiBlocks = [];
-    str = str.replace(/<tg-emoji emoji-id=["'](.*?)["']>(.*?)<\/tg-emoji>/gi, (match, id, text) => {
-        const placeholder = `TEMPEMOJIBLOCK${emojiBlocks.length}`;
-        emojiBlocks.push(`<tg-emoji emoji-id="${id}">${text}</tg-emoji>`);
+    // 0. Stash all valid HTML tags before escaping
+    const htmlBlocks = [];
+    str = str.replace(/<\/?(b|i|u|s|strong|em|ins|strike|del|code|pre|blockquote|a|tg-emoji)(\s+[^>]*?)?>/gi, (match) => {
+        const placeholder = `___HTMLBLOCK_${htmlBlocks.length}___`;
+        htmlBlocks.push(match);
         return placeholder;
     });
 
@@ -23,7 +23,7 @@ function mdToHtml(md) {
     // 2. Stash code blocks (`...`) to prevent formatting inside them
     const codeBlocks = [];
     str = str.replace(/`(.*?)`/g, (match, code) => {
-        const placeholder = `TEMPCODEBLOCK${codeBlocks.length}`;
+        const placeholder = `___CODEBLOCK_${codeBlocks.length}___`;
         codeBlocks.push(code);
         return placeholder;
     });
@@ -70,35 +70,34 @@ function mdToHtml(md) {
 
     // 7. Restore code blocks wrapped in <code>
     codeBlocks.forEach((code, index) => {
-        str = str.replace(`TEMPCODEBLOCK${index}`, `<code>${code}</code>`);
+        str = str.replace(`___CODEBLOCK_${index}___`, `<code>${code}</code>`);
     });
 
-    // 8. Restore Telegram Premium Custom Emoji tags (<tg-emoji>)
-    emojiBlocks.forEach((tag, index) => {
-        str = str.replace(`TEMPEMOJIBLOCK${index}`, tag);
+    // 8. Restore all stashed HTML tags
+    htmlBlocks.forEach((tag, index) => {
+        str = str.replace(`___HTMLBLOCK_${index}___`, tag);
     });
-    str = str.replace(/&lt;tg-emoji emoji-id=&quot;(.*?)&quot;&gt;(.*?)&lt;\/tg-emoji&gt;/gi, '<tg-emoji emoji-id="$1">$2</tg-emoji>');
-    str = str.replace(/&lt;tg-emoji emoji-id="(.*?)"&gt;(.*?)&lt;\/tg-emoji&gt;/gi, '<tg-emoji emoji-id="$1">$2</tg-emoji>');
-    str = str.replace(/&lt;tg-emoji emoji-id='(.*?)'&gt;(.*?)&lt;\/tg-emoji&gt;/gi, '<tg-emoji emoji-id="$1">$2</tg-emoji>');
 
     return str;
 }
 
 function telegramEntitiesToHtml(message) {
     if (!message || (!message.text && !message.caption)) return message ? (message.text || message.caption || '') : '';
-    let text = message.text || message.caption || '';
+    const text = message.text || message.caption || '';
     const entities = message.entities || message.caption_entities;
 
     if (!entities || entities.length === 0) {
-        return text;
+        return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
-    const sorted = [...entities].sort((a, b) => b.offset - a.offset);
+    const openTags = Array.from({ length: text.length + 1 }, () => []);
+    const closeTags = Array.from({ length: text.length + 1 }, () => []);
 
-    for (const e of sorted) {
+    for (const e of entities) {
         const start = e.offset;
         const end = e.offset + e.length;
-        const sub = text.substring(start, end);
+
+        if (start < 0 || end > text.length || start >= end) continue;
 
         let openTag = '';
         let closeTag = '';
@@ -129,19 +128,53 @@ function telegramEntitiesToHtml(message) {
                 openTag = '<blockquote expandable>'; closeTag = '</blockquote>';
                 break;
             case 'text_link':
-                openTag = `<a href="${e.url}">`; closeTag = '</a>';
+                if (e.url) {
+                    const safeUrl = e.url.replace(/"/g, '&quot;');
+                    openTag = `<a href="${safeUrl}">`; closeTag = '</a>';
+                }
                 break;
             case 'custom_emoji':
-                openTag = `<tg-emoji emoji-id="${e.custom_emoji_id}">`; closeTag = '</tg-emoji>';
+                if (e.custom_emoji_id && /^\d+$/.test(e.custom_emoji_id.toString().trim())) {
+                    openTag = `<tg-emoji emoji-id="${e.custom_emoji_id.toString().trim()}">`; closeTag = '</tg-emoji>';
+                }
                 break;
         }
 
         if (openTag && closeTag) {
-            text = text.substring(0, start) + openTag + sub + closeTag + text.substring(end);
+            openTags[start].push({ tag: openTag, length: e.length });
+            closeTags[end].push({ tag: closeTag, length: e.length });
         }
     }
 
-    return text;
+    let result = '';
+    for (let i = 0; i <= text.length; i++) {
+        // Closing tags: shorter length first for proper HTML nesting
+        if (closeTags[i].length > 0) {
+            closeTags[i].sort((a, b) => a.length - b.length);
+            for (const c of closeTags[i]) {
+                result += c.tag;
+            }
+        }
+
+        // Opening tags: longer length first for proper HTML nesting
+        if (openTags[i].length > 0) {
+            openTags[i].sort((a, b) => b.length - a.length);
+            for (const o of openTags[i]) {
+                result += o.tag;
+            }
+        }
+
+        // Output character at index i with HTML escaping
+        if (i < text.length) {
+            const ch = text[i];
+            if (ch === '&') result += '&amp;';
+            else if (ch === '<') result += '&lt;';
+            else if (ch === '>') result += '&gt;';
+            else result += ch;
+        }
+    }
+
+    return result;
 }
 
 function parseMessageWithEntities(message) {
@@ -372,7 +405,7 @@ let memoryNoticeText = "Welcome to AdsPower Seller BD!";
 
 async function getNoticeStatus() {
     if (db.isConfigured()) {
-        const coupon = await db.getCoupon('SYSTEM_NOTICE_ENABLED');
+        const coupon = await db.getCoupon('ADSPOWER_NOTICE_ENABLED');
         if (coupon) {
             return coupon.discount_amount === 1;
         }
@@ -384,7 +417,7 @@ async function getNoticeStatus() {
 async function setNoticeStatus(enabled) {
     const val = enabled ? 1 : 0;
     if (db.isConfigured()) {
-        await db.createCoupon('SYSTEM_NOTICE_ENABLED', val);
+        await db.createCoupon('ADSPOWER_NOTICE_ENABLED', val);
     } else {
         memoryNoticeEnabled = enabled;
     }
@@ -394,9 +427,9 @@ async function getNoticeText() {
     if (db.isConfigured()) {
         const coupons = await db.getAllCoupons();
         if (coupons) {
-            const noticeCoupon = coupons.find(cp => cp.code.startsWith('NOTICE_TEXT|'));
+            const noticeCoupon = coupons.find(cp => cp.code.startsWith('ADSPOWER_NOTICE_TEXT|'));
             if (noticeCoupon) {
-                return noticeCoupon.code.split('NOTICE_TEXT|')[1];
+                return noticeCoupon.code.split('ADSPOWER_NOTICE_TEXT|')[1];
             }
         }
     }
@@ -407,12 +440,12 @@ async function setNoticeText(text) {
     if (db.isConfigured()) {
         const coupons = await db.getAllCoupons();
         if (coupons) {
-            const oldNotices = coupons.filter(cp => cp.code.startsWith('NOTICE_TEXT|'));
+            const oldNotices = coupons.filter(cp => cp.code.startsWith('ADSPOWER_NOTICE_TEXT|'));
             for (const old of oldNotices) {
                 await db.deleteCoupon(old.code);
             }
         }
-        await db.createCoupon('NOTICE_TEXT|' + text, 0);
+        await db.createCoupon('ADSPOWER_NOTICE_TEXT|' + text, 0);
     } else {
         memoryNoticeText = text;
     }
@@ -442,7 +475,7 @@ async function getWallet(type) {
     if (db.isConfigured()) {
         const coupons = await db.getAllCoupons();
         if (coupons) {
-            const walletPrefix = `WALLET_${type.toUpperCase()}|`;
+            const walletPrefix = `ADSPOWER_WALLET_${type.toUpperCase()}|`;
             const coupon = coupons.find(cp => cp.code.startsWith(walletPrefix));
             if (coupon) {
                 return coupon.code.split(walletPrefix)[1];
@@ -456,13 +489,13 @@ async function setWallet(type, value) {
     if (db.isConfigured()) {
         const coupons = await db.getAllCoupons();
         if (coupons) {
-            const walletPrefix = `WALLET_${type.toUpperCase()}|`;
+            const walletPrefix = `ADSPOWER_WALLET_${type.toUpperCase()}|`;
             const oldWallets = coupons.filter(cp => cp.code.startsWith(walletPrefix));
             for (const old of oldWallets) {
                 await db.deleteCoupon(old.code);
             }
         }
-        await db.createCoupon(`WALLET_${type.toUpperCase()}|` + value, 0);
+        await db.createCoupon(`ADSPOWER_WALLET_${type.toUpperCase()}|` + value, 0);
     } else {
         memoryWallets[type] = value;
     }
@@ -479,8 +512,9 @@ async function setCustomText(key, value) {
 
 async function getItemEmojiTag(itemKey, defaultFallback = '⭐') {
     const emojiId = await getCustomText(`EMOJIID_${itemKey}`, '');
-    if (emojiId && emojiId.trim().length > 5 && !emojiId.includes('সরি') && !emojiId.includes('ডিফল্ট')) {
-        return `<tg-emoji emoji-id="${emojiId.trim()}">${defaultFallback}</tg-emoji>`;
+    const cleanId = (emojiId || '').toString().trim();
+    if (cleanId && /^\d+$/.test(cleanId)) {
+        return `<tg-emoji emoji-id="${cleanId}">${defaultFallback}</tg-emoji>`;
     }
     return defaultFallback;
 }
