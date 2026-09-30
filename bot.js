@@ -2112,26 +2112,26 @@ async function showAdminManagementMenu(ctx) {
         return;
     }
 
-    const searchLabel = await getCustomText('LABEL_ADMIN_SEARCH', '🟦 SEARCH ORDER / USER');
-    const vipLabel = await getCustomText('LABEL_ADMIN_VIP', '🟦 TOP VIP BUYERS');
-    const backupLabel = await getCustomText('LABEL_ADMIN_BACKUP', '🟦 FULL DB BACKUP (JSON)');
-    const todayLabel = await getCustomText('LABEL_ADMIN_TODAY_STATUS', '🟦 TODAY ALL STATUS');
-    const userStatusLabel = await getCustomText('LABEL_ADMIN_USER_STATUS', '🟦 USER STATUS CHECK');
-    const updateJoinsLabel = await getCustomText('LABEL_ADMIN_UPDATE_JOINS', '🟦 UPDATE JOINS');
-    const liveServicesLabel = await getCustomText('LABEL_ADMIN_LIVE_SERVICES', '🟦 LIVE SERVICES');
-    const customizeLabel = await getCustomText('LABEL_ADMIN_CUSTOMIZE', '🟦 CUSTOMIZE TEXTS & BUTTONS');
-    const banLabel = await getCustomText('LABEL_ADMIN_BAN_USER', '🟥 BAN USER');
-    const unbanLabel = await getCustomText('LABEL_ADMIN_UNBAN_USER', '🟩 UNBAN USER');
-    const banListLabel = await getCustomText('LABEL_ADMIN_BAN_LIST', '🟥 BAN USER LIST');
-    const removeBalLabel = await getCustomText('LABEL_ADMIN_REMOVE_BALANCE', '🟥 REMOVE BALANCE');
-    const addBalLabel = await getCustomText('LABEL_ADMIN_ADD_BALANCE', '🟩 ADD BALANCE');
-    const pendingOrdersLabel = await getCustomText('LABEL_ADMIN_PENDING_ORDERS', '🟩 PENDING ORDERS');
-    const totalUsersLabel = await getCustomText('LABEL_ADMIN_TOTAL_USERS', '🟦 TOTAL BOT USERS');
-    const broadcastLabel = await getCustomText('LABEL_ADMIN_BROADCAST', '🟦 BROADCAST');
-    const couponsLabel = await getCustomText('LABEL_ADMIN_COUPONS', '🟦 COUPONS');
-    const salesReportLabel = await getCustomText('LABEL_ADMIN_SALES_REPORT', '🟦 SALES REPORT');
-    const botControlLabel = await getCustomText('LABEL_ADMIN_BOT_CONTROL', '🟦 BOT CONTROL');
-    const closeLabel = await getCustomText('LABEL_ADMIN_CLOSE', '🟥 CLOSE ADMIN PANEL');
+    const searchLabel = await getCustomText('LABEL_ADMIN_SEARCH', 'SEARCH ORDER / USER');
+    const vipLabel = await getCustomText('LABEL_ADMIN_VIP', 'TOP VIP BUYERS');
+    const backupLabel = await getCustomText('LABEL_ADMIN_BACKUP', 'FULL DB BACKUP (JSON)');
+    const todayLabel = await getCustomText('LABEL_ADMIN_TODAY_STATUS', 'TODAY ALL STATUS');
+    const userStatusLabel = await getCustomText('LABEL_ADMIN_USER_STATUS', 'USER STATUS CHECK');
+    const updateJoinsLabel = await getCustomText('LABEL_ADMIN_UPDATE_JOINS', 'UPDATE JOINS');
+    const liveServicesLabel = await getCustomText('LABEL_ADMIN_LIVE_SERVICES', 'LIVE SERVICES');
+    const customizeLabel = await getCustomText('LABEL_ADMIN_CUSTOMIZE', 'CUSTOMIZE TEXTS & BUTTONS');
+    const banLabel = await getCustomText('LABEL_ADMIN_BAN_USER', 'BAN USER');
+    const unbanLabel = await getCustomText('LABEL_ADMIN_UNBAN_USER', 'UNBAN USER');
+    const banListLabel = await getCustomText('LABEL_ADMIN_BAN_LIST', 'BAN USER LIST');
+    const removeBalLabel = await getCustomText('LABEL_ADMIN_REMOVE_BALANCE', 'REMOVE BALANCE');
+    const addBalLabel = await getCustomText('LABEL_ADMIN_ADD_BALANCE', 'ADD BALANCE');
+    const pendingOrdersLabel = await getCustomText('LABEL_ADMIN_PENDING_ORDERS', 'PENDING ORDERS');
+    const totalUsersLabel = await getCustomText('LABEL_ADMIN_TOTAL_USERS', 'TOTAL BOT USERS');
+    const broadcastLabel = await getCustomText('LABEL_ADMIN_BROADCAST', 'BROADCAST');
+    const couponsLabel = await getCustomText('LABEL_ADMIN_COUPONS', 'COUPONS');
+    const salesReportLabel = await getCustomText('LABEL_ADMIN_SALES_REPORT', 'SALES REPORT');
+    const botControlLabel = await getCustomText('LABEL_ADMIN_BOT_CONTROL', 'BOT CONTROL');
+    const closeLabel = await getCustomText('LABEL_ADMIN_CLOSE', 'CLOSE ADMIN PANEL');
 
     const msgText = `🎛️ *Golden Admin Control Panel*\n\n` +
                     `শুধুমাত্র এডমিন আইডি দিয়ে অ্যাক্সেসযোগ্য। নিচের বাটনগুলো দিয়ে বটের অর্ডারিং, স্ট্যাটাস, ইউজার ব্যান/আনব্যান, ব্যালেন্স এবং কাস্টমাইজেশন নিয়ন্ত্রণ করুন:`;
