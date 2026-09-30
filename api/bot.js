@@ -2857,6 +2857,11 @@ bot.on(['text', 'photo', 'document'], async (ctx) => {
             }
 
             if (state.startsWith('waiting_for_card_') && text) {
+                if (text.trim() === '/cancel') {
+                    await clearAdminSession(userId);
+                    return ctx.reply("🚫 *কাস্টমাইজেশন বাতিল করা হয়েছে।*", { parse_mode: 'Markdown' });
+                }
+
                 const raw = state.replace('waiting_for_card_', '');
                 let field = '';
                 let itemKey = '';
@@ -2883,17 +2888,14 @@ bot.on(['text', 'photo', 'document'], async (ctx) => {
 
                 if (field === 'label') {
                     await setCustomText(`LABEL_${itemKey}`, formattedText.trim());
-                    await ctx.reply(`✅ *Label for ${itemKey} Updated with Premium Emoji!*`, { parse_mode: 'Markdown' });
                 } else if (field === 'msg') {
                     await setCustomText(`MSG_${itemKey}`, formattedText.trim());
                     if (['BKASH', 'NAGAD', 'BINANCE', 'PAYONEER'].includes(itemKey)) {
                         await setWallet(itemKey.toLowerCase(), text.trim());
                     }
-                    await ctx.reply(`✅ *Message for ${itemKey} Updated with Premium Emoji!*`, { parse_mode: 'Markdown' });
                 } else if (field === 'emojiid') {
                     const finalEmojiId = extractedEmojiId || text.trim();
                     await setCustomText(`EMOJIID_${itemKey}`, finalEmojiId);
-                    await ctx.reply(`✨ *Premium Emoji ID (${finalEmojiId}) for ${itemKey} Updated!*`, { parse_mode: 'Markdown' });
                 }
 
                 return showCustomizeItemCard(ctx, itemKey);
@@ -4495,34 +4497,24 @@ async function showCustomizeItemCard(ctx, itemKey) {
         defaultVal = await getWallet(itemKey.toLowerCase());
     }
 
-    const label = await getCustomText(`LABEL_${itemKey}`, item.defaultLabel);
-    const msg = await getCustomText(`MSG_${itemKey}`, defaultVal);
-    const emojiId = await getCustomText(`EMOJIID_${itemKey}`, '');
-    const emojiTag = await getItemEmojiTag(itemKey, '💡');
+    const currentMsg = await getCustomText(`MSG_${itemKey}`, defaultVal);
+    const safeMsgForDisplay = (currentMsg || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     const cardText = 
-        `🛠️ <b>CUSTOMIZING: ${item.name}</b>\n` +
-        `🏷️ <b>Key ID:</b> <code>${itemKey}</code>\n` +
-        `━━━━━━━━━━━━━━━━━━\n\n` +
-        `🏷️ <b>Label (BN):</b> ${label}\n\n` +
-        `📝 <b>Msg (BN):</b>\n` +
-        `" ${emojiTag} ${msg} "\n\n` +
-        `✨ <b>Premium Emoji ID:</b>\n` +
-        `<code>${emojiId || 'Not Set (ডিফল্ট)'}</code> ${emojiTag}\n\n` +
-        `ℹ️ <i>মেসেজের শুরুতে প্রিমিয়াম ইমোজি সংযুক্ত হচ্ছে।</i>\n\n` +
-        `👇 <i>আপনি যা পরিবর্তন করতে চান তা নিচে থেকে সিলেক্ট করুন:</i>`;
+        `✏️ <b>Text Editor: ${item.name}</b>\n` +
+        `━━━━━━━\n\n` +
+        `📌 <b>বর্তমান সেভ হওয়া টেক্সট:</b>\n` +
+        `<blockquote>${safeMsgForDisplay}</blockquote>\n` +
+        `━━━━━━━\n\n` +
+        `👇 <b>নতুন টেক্সট লিখে পাঠান:</b>\n` +
+        `(আপনি Telegram Premium কাস্টম ইমোজি, <b>বোল্ড</b>, <i>ইটালিক</i>, <code>কোড</code> বা\n` +
+        `<blockquote>কোটেশন</blockquote>\n` +
+        `ব্যবহার করতে পারবেন)\n\n` +
+        `🚫 বাতিল করতে /cancel টাইপ করুন।`;
 
     const keyboard = Markup.inlineKeyboard([
-        [
-            Markup.button.callback('🏷️ Edit Label', `edit_item_label_${itemKey}`),
-            Markup.button.callback('📝 Edit Message', `edit_item_msg_${itemKey}`)
-        ],
-        [
-            Markup.button.callback('✨ Edit Premium Emoji ID', `edit_item_emojiid_${itemKey}`)
-        ],
-        [
-            Markup.button.callback('🔙 Back to Customization', 'admin_customize_texts')
-        ]
+        [styledBtn('🔄 Reset this item to Default', `reset_cust_item_${itemKey}`, 'danger')],
+        [styledBtn('⬅️ Back to Category Sub-Buttons', 'admin_customize_texts', 'primary')]
     ]);
 
     if (ctx.callbackQuery) {
@@ -4583,14 +4575,18 @@ bot.action(/^cust_card_(.+)$/, async (ctx) => {
     await ctx.answerCbQuery();
     const itemKey = ctx.match[1];
     const adminId = ctx.from.id.toString();
-    const item = CUSTOMIZABLE_ITEMS[itemKey] || { name: itemKey };
     await updateAdminSession(adminId, { step: `waiting_for_card_msg_${itemKey}` });
-    return ctx.reply(
-        `📝 *Edit Message for ${item.name}*\n\n` +
-        `নতুন **Message / টেক্সট বিবরণ** সরাসরি লিখে বা পেস্ট করে পাঠান:\n` +
-        `*(ব্লককোট >, বোল্ড, ইটালিক, লিঙ্ক এবং কাস্টম প্রিমিয়াম ইমোজিসহ যেভাবে পাঠাবেন, ইউজাররা হুবহু সেভাবেই দেখতে পাবে!)*`,
-        { parse_mode: 'Markdown' }
-    );
+    return showCustomizeItemCard(ctx, itemKey);
+});
+
+bot.action(/^reset_cust_item_(.+)$/, async (ctx) => {
+    if (!isAdmin(ctx)) return ctx.answerCbQuery("Unauthorized!", { show_alert: true });
+    const itemKey = ctx.match[1];
+    await setCustomText(`MSG_${itemKey}`, '');
+    await setCustomText(`LABEL_${itemKey}`, '');
+    await setCustomText(`EMOJIID_${itemKey}`, '');
+    await ctx.answerCbQuery("Item reset to default!");
+    return showCustomizeItemCard(ctx, itemKey);
 });
 
 bot.action(/^edit_item_(label|msg|emojiid)_(.+)$/, async (ctx) => {
