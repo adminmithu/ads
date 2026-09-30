@@ -84,7 +84,7 @@ function mdToHtml(md) {
     return str;
 }
 
-function parseMessageWithEntities(message) {
+function telegramEntitiesToHtml(message) {
     if (!message || (!message.text && !message.caption)) return message ? (message.text || message.caption || '') : '';
     let text = message.text || message.caption || '';
     const entities = message.entities || message.caption_entities;
@@ -93,23 +93,59 @@ function parseMessageWithEntities(message) {
         return text;
     }
 
-    const customEmojiEntities = entities
-        .filter(e => e.type === 'custom_emoji' && e.custom_emoji_id)
-        .sort((a, b) => b.offset - a.offset);
+    const sorted = [...entities].sort((a, b) => b.offset - a.offset);
 
-    if (customEmojiEntities.length === 0) {
-        return text;
-    }
+    for (const e of sorted) {
+        const start = e.offset;
+        const end = e.offset + e.length;
+        const sub = text.substring(start, end);
 
-    for (const entity of customEmojiEntities) {
-        const start = entity.offset;
-        const end = entity.offset + entity.length;
-        const emojiStr = text.substring(start, end);
-        const tag = `<tg-emoji emoji-id="${entity.custom_emoji_id}">${emojiStr}</tg-emoji>`;
-        text = text.substring(0, start) + tag + text.substring(end);
+        let openTag = '';
+        let closeTag = '';
+
+        switch (e.type) {
+            case 'bold':
+                openTag = '<b>'; closeTag = '</b>';
+                break;
+            case 'italic':
+                openTag = '<i>'; closeTag = '</i>';
+                break;
+            case 'underline':
+                openTag = '<u>'; closeTag = '</u>';
+                break;
+            case 'strikethrough':
+                openTag = '<s>'; closeTag = '</s>';
+                break;
+            case 'code':
+                openTag = '<code>'; closeTag = '</code>';
+                break;
+            case 'pre':
+                openTag = '<pre>'; closeTag = '</pre>';
+                break;
+            case 'blockquote':
+                openTag = '<blockquote>'; closeTag = '</blockquote>';
+                break;
+            case 'expandable_blockquote':
+                openTag = '<blockquote expandable>'; closeTag = '</blockquote>';
+                break;
+            case 'text_link':
+                openTag = `<a href="${e.url}">`; closeTag = '</a>';
+                break;
+            case 'custom_emoji':
+                openTag = `<tg-emoji emoji-id="${e.custom_emoji_id}">`; closeTag = '</tg-emoji>';
+                break;
+        }
+
+        if (openTag && closeTag) {
+            text = text.substring(0, start) + openTag + sub + closeTag + text.substring(end);
+        }
     }
 
     return text;
+}
+
+function parseMessageWithEntities(message) {
+    return telegramEntitiesToHtml(message);
 }
 
 function extractFirstCustomEmojiId(message) {
@@ -4512,7 +4548,15 @@ bot.action(/^cust_card_(.+)$/, async (ctx) => {
     if (!isAdmin(ctx)) return ctx.answerCbQuery("Unauthorized!", { show_alert: true });
     await ctx.answerCbQuery();
     const itemKey = ctx.match[1];
-    return showCustomizeItemCard(ctx, itemKey);
+    const adminId = ctx.from.id.toString();
+    const item = CUSTOMIZABLE_ITEMS[itemKey] || { name: itemKey };
+    await updateAdminSession(adminId, { step: `waiting_for_card_msg_${itemKey}` });
+    return ctx.reply(
+        `📝 *Edit Message for ${item.name}*\n\n` +
+        `নতুন **Message / টেক্সট বিবরণ** সরাসরি লিখে বা পেস্ট করে পাঠান:\n` +
+        `*(ব্লককোট >, বোল্ড, ইটালিক, লিঙ্ক এবং কাস্টম প্রিমিয়াম ইমোজিসহ যেভাবে পাঠাবেন, ইউজাররা হুবহু সেভাবেই দেখতে পাবে!)*`,
+        { parse_mode: 'Markdown' }
+    );
 });
 
 bot.action(/^edit_item_(label|msg|emojiid)_(.+)$/, async (ctx) => {
