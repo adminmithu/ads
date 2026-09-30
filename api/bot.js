@@ -1034,6 +1034,7 @@ async function updateUserSession(userId, updateData) {
 async function getAdminSession(userId) {
     if (db.isConfigured()) {
         try {
+            if (db.dbCache) db.dbCache.allCoupons = null;
             const coupons = await db.getAllCoupons();
             if (coupons) {
                 const prefix = `ADMIN_SESSION_${userId}|`;

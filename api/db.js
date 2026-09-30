@@ -322,7 +322,7 @@ async function getAllCoupons() {
       .select('*')
       .order('created_at', { ascending: false });
     if (error) throw error;
-    dbCache.allCoupons = { value: data, expiry: Date.now() + 60000 };
+    dbCache.allCoupons = { value: data, expiry: Date.now() + 1000 };
     return data;
   } catch (err) {
     console.error('Supabase getAllCoupons error:', err.message);
