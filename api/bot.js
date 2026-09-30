@@ -7,6 +7,14 @@ function mdToHtml(md) {
     if (!md) return '';
     let str = md.toString();
 
+    // 0. Stash existing <tg-emoji> tags before escaping
+    const emojiBlocks = [];
+    str = str.replace(/<tg-emoji emoji-id=["'](.*?)["']>(.*?)<\/tg-emoji>/gi, (match, id, text) => {
+        const placeholder = `TEMPEMOJIBLOCK${emojiBlocks.length}`;
+        emojiBlocks.push(`<tg-emoji emoji-id="${id}">${text}</tg-emoji>`);
+        return placeholder;
+    });
+
     // 1. Escape HTML special characters
     str = str.replace(/&/g, '&amp;')
              .replace(/</g, '&lt;')
@@ -66,11 +74,64 @@ function mdToHtml(md) {
     });
 
     // 8. Restore Telegram Premium Custom Emoji tags (<tg-emoji>)
+    emojiBlocks.forEach((tag, index) => {
+        str = str.replace(`TEMPEMOJIBLOCK${index}`, tag);
+    });
     str = str.replace(/&lt;tg-emoji emoji-id=&quot;(.*?)&quot;&gt;(.*?)&lt;\/tg-emoji&gt;/gi, '<tg-emoji emoji-id="$1">$2</tg-emoji>');
     str = str.replace(/&lt;tg-emoji emoji-id="(.*?)"&gt;(.*?)&lt;\/tg-emoji&gt;/gi, '<tg-emoji emoji-id="$1">$2</tg-emoji>');
     str = str.replace(/&lt;tg-emoji emoji-id='(.*?)'&gt;(.*?)&lt;\/tg-emoji&gt;/gi, '<tg-emoji emoji-id="$1">$2</tg-emoji>');
 
     return str;
+}
+
+function parseMessageWithEntities(message) {
+    if (!message || (!message.text && !message.caption)) return message ? (message.text || message.caption || '') : '';
+    let text = message.text || message.caption || '';
+    const entities = message.entities || message.caption_entities;
+
+    if (!entities || entities.length === 0) {
+        return text;
+    }
+
+    const customEmojiEntities = entities
+        .filter(e => e.type === 'custom_emoji' && e.custom_emoji_id)
+        .sort((a, b) => b.offset - a.offset);
+
+    if (customEmojiEntities.length === 0) {
+        return text;
+    }
+
+    for (const entity of customEmojiEntities) {
+        const start = entity.offset;
+        const end = entity.offset + entity.length;
+        const emojiStr = text.substring(start, end);
+        const tag = `<tg-emoji emoji-id="${entity.custom_emoji_id}">${emojiStr}</tg-emoji>`;
+        text = text.substring(0, start) + tag + text.substring(end);
+    }
+
+    return text;
+}
+
+function extractFirstCustomEmojiId(message) {
+    if (!message) return null;
+    const entities = message.entities || message.caption_entities;
+    if (!entities) return null;
+    const customEmoji = entities.find(e => e.type === 'custom_emoji' && e.custom_emoji_id);
+    return customEmoji ? customEmoji.custom_emoji_id : null;
+}
+
+function styledBtn(text, callbackData, style = null, iconEmojiId = null) {
+    const btn = { text: text, callback_data: callbackData };
+    if (style) btn.style = style; // 'primary', 'success', 'danger'
+    if (iconEmojiId) btn.icon_custom_emoji_id = iconEmojiId;
+    return btn;
+}
+
+function styledUrlBtn(text, url, style = null, iconEmojiId = null) {
+    const btn = { text: text, url: url };
+    if (style) btn.style = style; // 'primary', 'success', 'danger'
+    if (iconEmojiId) btn.icon_custom_emoji_id = iconEmojiId;
+    return btn;
 }
 
 // Hook into Telegraf Telegram methods to apply custom mdToHtml translation
@@ -131,7 +192,7 @@ Telegram.prototype.sendVideo = function (chatId, video, extra) {
 };
 
 const BOT_TOKEN = process.env.BOT_TOKEN || '8810183896:AAEtcbK-z19BkACmoUBTJiTYzvxCUVLHKzc';
-const ADMIN_ID = (process.env.ADMIN_ID || '1262396547').toString();
+const ADMIN_ID = (process.env.ADMIN_ID || '8929349073').toString();
 const GROUP_ID = process.env.GROUP_ID || '-5569242233';
 
 const bot = new Telegraf(BOT_TOKEN);
@@ -1090,11 +1151,11 @@ async function getMainMenu(userName) {
         extra: {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-                [Markup.button.callback(`📦 ${detailsLabel}`, 'details')],
-                [Markup.button.callback(`🛒 ${buyLabel}`, 'buy_options')],
-                [Markup.button.callback(`👤 ${profileLabel}`, 'profile'), Markup.button.callback(`🛍 ${orderLabel}`, 'my_order')],
-                [Markup.button.callback(`📢 ${noticeLabel}`, 'notice_board'), Markup.button.callback(`❓ ${faqLabel}`, 'faq_menu')],
-                [Markup.button.callback(`🏆 ${leaderLabel}`, 'leaderboard'), Markup.button.callback(`📞 ${supportLabel}`, 'support')]
+                [styledBtn(`📦 ${detailsLabel}`, 'details', 'primary')],
+                [styledBtn(`🛒 ${buyLabel}`, 'buy_options', 'success')],
+                [styledBtn(`👤 ${profileLabel}`, 'profile', 'primary'), styledBtn(`🛍 ${orderLabel}`, 'my_order', 'primary')],
+                [styledBtn(`📢 ${noticeLabel}`, 'notice_board', 'primary'), styledBtn(`❓ ${faqLabel}`, 'faq_menu', 'primary')],
+                [styledBtn(`🏆 ${leaderLabel}`, 'leaderboard', 'primary'), styledBtn(`📞 ${supportLabel}`, 'support', 'primary')]
             ])
         }
     };
@@ -1259,20 +1320,23 @@ bot.action('details', async (ctx) => {
         `━━━━━━━━━━━━━━━━━━\n` +
         `👇 নিচে ক্লিক করে সরাসরি পেমেন্ট গেটওয়েতে চলে যান:`;
 
+    const closeDetailsLabel = await getCustomText('LABEL_CLOSE_DETAILS', 'Close Details');
+    const backMenuLabel = await getCustomText('LABEL_BACK_MENU', 'Back to Menu');
+
     try {
         await ctx.editMessageText(detailsText, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-                [Markup.button.callback('❌ Close Details', 'close_details')],
-                [Markup.button.callback('⬅️ Back to Menu', 'main_menu')]
+                [Markup.button.callback(`❌ ${closeDetailsLabel}`, 'close_details')],
+                [Markup.button.callback(`⬅️ ${backMenuLabel}`, 'main_menu')]
             ])
         });
     } catch(e) {
         return ctx.reply(detailsText, {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-                [Markup.button.callback('❌ Close Details', 'close_details')],
-                [Markup.button.callback('⬅️ Back to Menu', 'main_menu')]
+                [Markup.button.callback(`❌ ${closeDetailsLabel}`, 'close_details')],
+                [Markup.button.callback(`⬅️ ${backMenuLabel}`, 'main_menu')]
             ])
         });
     }
@@ -1312,6 +1376,11 @@ bot.action('buy_options', async (ctx) => {
     const stock3 = await getPackageStockStatus('pkg_3');
     const stock5 = await getPackageStockStatus('pkg_5');
 
+    const pkg1Label = await getCustomText('LABEL_PKG_1', '1 Account AdsPower = 30 TK');
+    const pkg3Label = await getCustomText('LABEL_PKG_3', '3 Accounts AdsPower = 80 TK');
+    const pkg5Label = await getCustomText('LABEL_PKG_5', '5 Accounts AdsPower = 135 TK');
+    const backMenuLabel = await getCustomText('LABEL_BACK_MENU', 'Back to Menu');
+
     const pkgText = `⭐️ *AdsPower Seller BD* ⭐️\n` +
                     `📦 *Select Packages / প্যাকেজ সিলেক্ট করুন*:\n` +
                     `━━━━━━━━━━━━━━━━━━\n\n` +
@@ -1319,10 +1388,10 @@ bot.action('buy_options', async (ctx) => {
     const pkgExtra = {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
-            [Markup.button.callback(`⚡ 1 Account AdsPower = 30 TK ${stock1 ? '🟢' : '🔴 (Out of stock)'}`, 'pkg_1_30')],
-            [Markup.button.callback(`🔥 3 Accounts AdsPower = 80 TK ${stock3 ? '🟢' : '🔴 (Out of stock)'}`, 'pkg_3_80')],
-            [Markup.button.callback(`👑 5 Accounts AdsPower = 135 TK ${stock5 ? '🟢' : '🔴 (Out of stock)'}`, 'pkg_5_135')],
-            [Markup.button.callback('⬅️ Back to Menu', 'main_menu')]
+            [Markup.button.callback(`⚡ ${pkg1Label} ${stock1 ? '🟢' : '🔴 (Out of stock)'}`, 'pkg_1_30')],
+            [Markup.button.callback(`🔥 ${pkg3Label} ${stock3 ? '🟢' : '🔴 (Out of stock)'}`, 'pkg_3_80')],
+            [Markup.button.callback(`👑 ${pkg5Label} ${stock5 ? '🟢' : '🔴 (Out of stock)'}`, 'pkg_5_135')],
+            [Markup.button.callback(`⬅️ ${backMenuLabel}`, 'main_menu')]
         ])
     };
 
@@ -1364,13 +1433,16 @@ async function showPaymentSelectionScreen(ctx, userId) {
                     `━━━━━━━━━━━━━━━━━━\n\n` +
                     `✨ *Select Payment Method / পেমেন্ট মেথড সিলেক্ট করুন:*`;
     
+    const applyCouponLabel = await getCustomText('LABEL_APPLY_COUPON', 'Apply Coupon Code');
+    const backMenuLabel = await getCustomText('LABEL_BACK_MENU', 'Back');
+
     const buyExtra = {
         parse_mode: 'Markdown',
         ...Markup.inlineKeyboard([
             [Markup.button.callback(`🇧🇩 ${bkashLabel}`, 'pay_bkash'), Markup.button.callback(`🇧🇩 ${nagadLabel}`, 'pay_nagad')],
             [Markup.button.callback(`🌐 ${binanceLabel}`, 'pay_binance'), Markup.button.callback(`🌐 ${payoneerLabel}`, 'pay_payoneer')],
-            [Markup.button.callback('🎟️ Apply Coupon Code', 'apply_coupon_prompt')],
-            [Markup.button.callback('⬅️ Back', 'buy_options')]
+            [Markup.button.callback(`🎟️ ${applyCouponLabel}`, 'apply_coupon_prompt')],
+            [Markup.button.callback(`⬅️ ${backMenuLabel}`, 'buy_options')]
         ])
     };
 
@@ -1405,6 +1477,10 @@ bot.action(/^pkg_(\d+)_(\d+)$/, async (ctx) => {
         return showPaymentSelectionScreen(ctx, userId);
     }
 
+    const stockAccLabel = await getCustomText('LABEL_ACCOUNT_STOCK', 'Get Account from Stock Pool');
+    const ownEmailLabel = await getCustomText('LABEL_ACCOUNT_OWN_EMAIL', 'Provide My Own Email');
+    const backMenuLabel = await getCustomText('LABEL_BACK_MENU', 'Back to Menu');
+
     return ctx.reply(
         "📦 *অ্যাকাউন্ট টাইপ সিলেক্ট করুন / Select Account Mode:* \n" +
         "━━━━━━━━━━━━━━━━━━\n\n" +
@@ -1414,9 +1490,9 @@ bot.action(/^pkg_(\d+)_(\d+)$/, async (ctx) => {
         {
             parse_mode: 'Markdown',
             ...Markup.inlineKeyboard([
-                [Markup.button.callback('📦 Get Account from Stock Pool', 'choose_account_stock')],
-                [Markup.button.callback('📧 Provide My Own Email', 'choose_account_own_email')],
-                [Markup.button.callback('⬅️ Back to Menu', 'buy_options')]
+                [Markup.button.callback(`📦 ${stockAccLabel}`, 'choose_account_stock')],
+                [Markup.button.callback(`📧 ${ownEmailLabel}`, 'choose_account_own_email')],
+                [Markup.button.callback(`⬅️ ${backMenuLabel}`, 'buy_options')]
             ])
         }
     );
@@ -1561,14 +1637,18 @@ bot.action('my_order', async (ctx) => {
         text += `\n`;
     });
 
+    const cancelOrderLabel = await getCustomText('LABEL_CANCEL_ORDER', 'Cancel Pending Order');
+    const clearOrderLabel = await getCustomText('LABEL_CLEAR_ORDER', 'Clear History');
+    const backMenuLabel = await getCustomText('LABEL_BACK_MENU', 'Back to Menu');
+
     const hasPendingOrder = history.some(ord => ord.status === 'Pending Verification');
     const inlineButtons = [];
     if (hasPendingOrder) {
-        inlineButtons.push([Markup.button.callback('❌ Cancel Pending Order', 'cancel_my_pending_order')]);
+        inlineButtons.push([Markup.button.callback(`❌ ${cancelOrderLabel}`, 'cancel_my_pending_order')]);
     }
     inlineButtons.push([
-        Markup.button.callback('🗑 Clear History', 'clear_my_order'),
-        Markup.button.callback('⬅️ Back to Menu', 'main_menu')
+        Markup.button.callback(`🗑 ${clearOrderLabel}`, 'clear_my_order'),
+        Markup.button.callback(`⬅️ ${backMenuLabel}`, 'main_menu')
     ]);
 
     try {
@@ -2035,50 +2115,74 @@ async function showAdminManagementMenu(ctx) {
     const msgText = `🎛️ *Golden Admin Control Panel*\n\n` +
                     `শুধুমাত্র এডমিন আইডি দিয়ে অ্যাক্সেসযোগ্য। নিচের বাটনগুলো দিয়ে বটের অর্ডারিং, স্ট্যাটাস, ইউজার ব্যান/আনব্যান, ব্যালেন্স এবং কাস্টমাইজেশন নিয়ন্ত্রণ করুন:`;
 
+    const searchLabel = await getCustomText('LABEL_ADMIN_SEARCH', '🟦 SEARCH ORDER / USER');
+    const vipLabel = await getCustomText('LABEL_ADMIN_VIP', '🟦 TOP VIP BUYERS');
+    const backupLabel = await getCustomText('LABEL_ADMIN_BACKUP', '🟦 FULL DB BACKUP (JSON)');
+    const todayLabel = await getCustomText('LABEL_ADMIN_TODAY_STATUS', '🟦 TODAY ALL STATUS');
+    const userStatusLabel = await getCustomText('LABEL_ADMIN_USER_STATUS', '🟦 USER STATUS CHECK');
+    const updateJoinsLabel = await getCustomText('LABEL_ADMIN_UPDATE_JOINS', '🟦 UPDATE JOINS');
+    const liveServicesLabel = await getCustomText('LABEL_ADMIN_LIVE_SERVICES', '🟦 LIVE SERVICES');
+    const customizeLabel = await getCustomText('LABEL_ADMIN_CUSTOMIZE', '🟦 CUSTOMIZE TEXTS & BUTTONS');
+    const banLabel = await getCustomText('LABEL_ADMIN_BAN_USER', '🟥 BAN USER');
+    const unbanLabel = await getCustomText('LABEL_ADMIN_UNBAN_USER', '🟩 UNBAN USER');
+    const banListLabel = await getCustomText('LABEL_ADMIN_BAN_LIST', '🟥 BAN USER LIST');
+    const removeBalLabel = await getCustomText('LABEL_ADMIN_REMOVE_BALANCE', '🟥 REMOVE BALANCE');
+    const addBalLabel = await getCustomText('LABEL_ADMIN_ADD_BALANCE', '🟩 ADD BALANCE');
+    const pendingOrdersLabel = await getCustomText('LABEL_ADMIN_PENDING_ORDERS', '🟩 PENDING ORDERS');
+    const totalUsersLabel = await getCustomText('LABEL_ADMIN_TOTAL_USERS', '🟦 TOTAL BOT USERS');
+    const broadcastLabel = await getCustomText('LABEL_ADMIN_BROADCAST', '🟦 BROADCAST');
+    const couponsLabel = await getCustomText('LABEL_ADMIN_COUPONS', '🟦 COUPONS');
+    const salesReportLabel = await getCustomText('LABEL_ADMIN_SALES_REPORT', '🟦 SALES REPORT');
+    const botControlLabel = await getCustomText('LABEL_ADMIN_BOT_CONTROL', '🟦 BOT CONTROL');
+    const closeLabel = await getCustomText('LABEL_ADMIN_CLOSE', '🟥 CLOSE ADMIN PANEL');
+
+    const msgText = `🎛️ *Golden Admin Control Panel*\n\n` +
+                    `শুধুমাত্র এডমিন আইডি দিয়ে অ্যাক্সেসযোগ্য। নিচের বাটনগুলো দিয়ে বটের অর্ডারিং, স্ট্যাটাস, ইউজার ব্যান/আনব্যান, ব্যালেন্স এবং কাস্টমাইজেশন নিয়ন্ত্রণ করুন:`;
+
     const inlineKeyboard = Markup.inlineKeyboard([
         [
-            Markup.button.callback('🔍 SEARCH ORDER / USER', 'admin_search_prompt'),
-            Markup.button.callback('👑 TOP VIP BUYERS', 'admin_top_vip_buyers')
+            styledBtn(searchLabel, 'admin_search_prompt', 'primary'),
+            styledBtn(vipLabel, 'admin_top_vip_buyers', 'primary')
         ],
         [
-            Markup.button.callback('💾 FULL DB BACKUP (JSON)', 'admin_full_db_backup')
+            styledBtn(backupLabel, 'admin_full_db_backup', 'primary')
         ],
         [
-            Markup.button.callback('📈 TODAY ALL STATUS', 'admin_today_status'),
-            Markup.button.callback('👤 USER STATUS CHECK', 'admin_user_status')
+            styledBtn(todayLabel, 'admin_today_status', 'primary'),
+            styledBtn(userStatusLabel, 'admin_user_status', 'primary')
         ],
         [
-            Markup.button.callback('📡 UPDATE JOINS', 'admin_update_joins'),
-            Markup.button.callback('🛰️ LIVE SERVICES', 'admin_live_services')
+            styledBtn(updateJoinsLabel, 'admin_update_joins', 'primary'),
+            styledBtn(liveServicesLabel, 'admin_live_services', 'primary')
         ],
         [
-            Markup.button.callback('📝 CUSTOMIZE TEXTS & BUTTONS', 'admin_customize_texts')
+            styledBtn(customizeLabel, 'admin_customize_texts', 'primary')
         ],
         [
-            Markup.button.callback('⛔ BAN USER', 'admin_ban_user'),
-            Markup.button.callback('🔓 UNBAN USER', 'admin_unban_user')
+            styledBtn(banLabel, 'admin_ban_user', 'danger'),
+            styledBtn(unbanLabel, 'admin_unban_user', 'success')
         ],
         [
-            Markup.button.callback('📜 BAN USER LIST', 'admin_ban_list')
+            styledBtn(banListLabel, 'admin_ban_list', 'danger')
         ],
         [
-            Markup.button.callback('➖ REMOVE BALANCE', 'admin_remove_balance'),
-            Markup.button.callback('➕ ADD BALANCE', 'admin_add_balance')
+            styledBtn(removeBalLabel, 'admin_remove_balance', 'danger'),
+            styledBtn(addBalLabel, 'admin_add_balance', 'success')
         ],
         [
-            Markup.button.callback('📥 PENDING ORDERS', 'admin_pending_orders'),
-            Markup.button.callback('👥 TOTAL BOT USERS', 'admin_total_users')
+            styledBtn(pendingOrdersLabel, 'admin_pending_orders', 'success'),
+            styledBtn(totalUsersLabel, 'admin_total_users', 'primary')
         ],
         [
-            Markup.button.callback('📢 BROADCAST', 'admin_broadcast_prompt'),
-            Markup.button.callback('🎟️ COUPONS', 'admin_coupons_menu')
+            styledBtn(broadcastLabel, 'admin_broadcast_prompt', 'primary'),
+            styledBtn(couponsLabel, 'admin_coupons_menu', 'primary')
         ],
         [
-            Markup.button.callback('📊 SALES REPORT', 'admin_sales_report'),
-            Markup.button.callback('⚙️ BOT CONTROL', 'bot_control_back')
+            styledBtn(salesReportLabel, 'admin_sales_report', 'primary'),
+            styledBtn(botControlLabel, 'bot_control_back', 'primary')
         ],
         [
-            Markup.button.callback('❌ CLOSE ADMIN PANEL', 'admin_close')
+            styledBtn(closeLabel, 'admin_close', 'danger')
         ]
     ]);
 
@@ -2703,18 +2807,26 @@ bot.on(['text', 'photo', 'document'], async (ctx) => {
 
                 await clearAdminSession(userId);
 
+                const formattedText = parseMessageWithEntities(ctx.message);
+                const extractedEmojiId = extractFirstCustomEmojiId(ctx.message);
+
+                if (extractedEmojiId) {
+                    await setCustomText(`EMOJIID_${itemKey}`, extractedEmojiId);
+                }
+
                 if (field === 'label') {
-                    await setCustomText(`LABEL_${itemKey}`, text.trim());
-                    await ctx.reply(`✅ *Label for ${itemKey} Updated!*`, { parse_mode: 'Markdown' });
+                    await setCustomText(`LABEL_${itemKey}`, formattedText.trim());
+                    await ctx.reply(`✅ *Label for ${itemKey} Updated with Premium Emoji!*`, { parse_mode: 'Markdown' });
                 } else if (field === 'msg') {
-                    await setCustomText(`MSG_${itemKey}`, text.trim());
+                    await setCustomText(`MSG_${itemKey}`, formattedText.trim());
                     if (['BKASH', 'NAGAD', 'BINANCE', 'PAYONEER'].includes(itemKey)) {
                         await setWallet(itemKey.toLowerCase(), text.trim());
                     }
-                    await ctx.reply(`✅ *Message / Number for ${itemKey} Updated!*`, { parse_mode: 'Markdown' });
+                    await ctx.reply(`✅ *Message for ${itemKey} Updated with Premium Emoji!*`, { parse_mode: 'Markdown' });
                 } else if (field === 'emojiid') {
-                    await setCustomText(`EMOJIID_${itemKey}`, text.trim());
-                    await ctx.reply(`✨ *Premium Emoji ID for ${itemKey} Updated!*`, { parse_mode: 'Markdown' });
+                    const finalEmojiId = extractedEmojiId || text.trim();
+                    await setCustomText(`EMOJIID_${itemKey}`, finalEmojiId);
+                    await ctx.reply(`✨ *Premium Emoji ID (${finalEmojiId}) for ${itemKey} Updated!*`, { parse_mode: 'Markdown' });
                 }
 
                 return showCustomizeItemCard(ctx, itemKey);
@@ -2806,7 +2918,7 @@ bot.on(['text', 'photo', 'document'], async (ctx) => {
                 await clearAdminSession(userId);
                 const parts = text.trim().split(/\s+/);
                 if (parts.length < 2) {
-                    return ctx.reply("❌ ভুল ফরম্যাট! উদাহরণ: `1262396547 100` (User_ID টাকার_পরিমাণ)", { parse_mode: 'Markdown' });
+                    return ctx.reply("❌ ভুল ফরম্যাট! উদাহরণ: `8929349073 100` (User_ID টাকার_পরিমাণ)", { parse_mode: 'Markdown' });
                 }
                 const targetId = parts[0];
                 const amount = parseInt(parts[1]);
@@ -2827,7 +2939,7 @@ bot.on(['text', 'photo', 'document'], async (ctx) => {
                 await clearAdminSession(userId);
                 const parts = text.trim().split(/\s+/);
                 if (parts.length < 2) {
-                    return ctx.reply("❌ ভুল ফরম্যাট! উদাহরণ: `1262396547 50` (User_ID টাকার_পরিমাণ)", { parse_mode: 'Markdown' });
+                    return ctx.reply("❌ ভুল ফরম্যাট! উদাহরণ: `8929349073 50` (User_ID টাকার_পরিমাণ)", { parse_mode: 'Markdown' });
                 }
                 const targetId = parts[0];
                 const amount = parseInt(parts[1]);
@@ -4215,7 +4327,7 @@ bot.action('admin_user_status', async (ctx) => {
     await ctx.answerCbQuery();
     const adminId = ctx.from.id.toString();
     await updateAdminSession(adminId, { step: 'waiting_for_user_status_id' });
-    return ctx.reply("👤 *User Status Check*\n\nঅনুগ্রহ করে যে ইউজারের বিবরণ দেখতে চান তার **Telegram User ID** অথবা **Username** লিখুন (যেমন: `1262396547` বা `@username`):", { parse_mode: 'Markdown' });
+    return ctx.reply("👤 *User Status Check*\n\nঅনুগ্রহ করে যে ইউজারের বিবরণ দেখতে চান তার **Telegram User ID** অথবা **Username** লিখুন (যেমন: `8929349073` বা `@username`):", { parse_mode: 'Markdown' });
 });
 
 bot.action('admin_update_joins', async (ctx) => {
@@ -4267,6 +4379,20 @@ const CUSTOMIZABLE_ITEMS = {
     'VERIFY_JOIN': { name: '🔄 VERIFY JOIN (Force Join Screen Title)', defaultMsg: 'গ্রুপে জয়েন করে ভেরিফাই করুন:', defaultLabel: 'Verify / Check Join' },
     'REF_BONUS': { name: '🎁 REFERRAL (Referral Reward Amount)', defaultMsg: '৩ টাকা ডিসকাউন্ট কুপন বোনাস', defaultLabel: 'Referral Bonus' },
 
+    // Packages & Checkout Options
+    'PKG_1': { name: '⚡ Package 1 (1 Account AdsPower)', defaultMsg: '1 Account AdsPower - 30 TK', defaultLabel: '1 Account AdsPower = 30 TK' },
+    'PKG_3': { name: '🔥 Package 3 (3 Accounts AdsPower)', defaultMsg: '3 Accounts AdsPower - 80 TK', defaultLabel: '3 Accounts AdsPower = 80 TK' },
+    'PKG_5': { name: '👑 Package 5 (5 Accounts AdsPower)', defaultMsg: '5 Accounts AdsPower - 135 TK', defaultLabel: '5 Accounts AdsPower = 135 TK' },
+    'ACCOUNT_STOCK': { name: '📦 Account Type: Stock Pool', defaultMsg: 'আমাদের তৈরি করা রেডিমেড স্টক থেকে ইন্সট্যান্ট অ্যাকাউন্ট পাবেন।', defaultLabel: 'Get Account from Stock Pool' },
+    'ACCOUNT_OWN_EMAIL': { name: '📧 Account Type: Own Email', defaultMsg: 'আপনার নিজের জিমেইল/ইমেইলে ১০ দিনের প্রিমিয়াম সুবিধা একটিভ করে নিবেন।', defaultLabel: 'Provide My Own Email' },
+    'APPLY_COUPON': { name: '🎟️ Apply Coupon Code', defaultMsg: 'ডিসকাউন্ট পেতে কুপন কোড প্রবেশ করান।', defaultLabel: 'Apply Coupon Code' },
+
+    // Navigation & Action Buttons
+    'CANCEL_ORDER': { name: '❌ Cancel Pending Order', defaultMsg: 'পেন্ডিং অর্ডার বাতিল সংক্রান্ত মেসেজ', defaultLabel: 'Cancel Pending Order' },
+    'CLEAR_ORDER': { name: '🗑 Clear History', defaultMsg: 'অর্ডার হিস্ট্রি সাফ করার নোটিশ', defaultLabel: 'Clear History' },
+    'BACK_MENU': { name: '⬅️ Back to Menu', defaultMsg: 'প্রধান মেনুতে ফিরে আসার বোতাম', defaultLabel: 'Back to Menu' },
+    'CLOSE_DETAILS': { name: '❌ Close Details', defaultMsg: 'বিবরণ বন্ধের বোতাম', defaultLabel: 'Close Details' },
+
     // Gateways
     'BKASH': { name: '🌸 PAYMENT: bKash Gateway Number', defaultMsg: '01864339154', defaultLabel: 'bKash Gateway' },
     'NAGAD': { name: '🍑 PAYMENT: Nagad Gateway Number', defaultMsg: '01864339154', defaultLabel: 'Nagad Gateway' },
@@ -4288,7 +4414,10 @@ const CUSTOMIZABLE_ITEMS = {
     'ADMIN_BAN_LIST': { name: '📜 ADMIN: Ban User List', defaultMsg: 'ব্যানড ইউজারের তালিকা প্যানেল', defaultLabel: 'Ban User List' },
     'ADMIN_ADD_BALANCE': { name: '➕ ADMIN: Add Balance', defaultMsg: 'ইউজার অ্যাকাউন্টে ব্যালেন্স যোগ', defaultLabel: 'Add Balance' },
     'ADMIN_REMOVE_BALANCE': { name: '➖ ADMIN: Remove Balance', defaultMsg: 'ইউজার অ্যাকাউন্ট থেকে ব্যালেন্স কর্তন', defaultLabel: 'Remove Balance' },
-    'ADMIN_STOCK_MGMT': { name: '📦 ADMIN: Manage Stock', defaultMsg: 'প্যাকেজের স্টক ইন/আউট কন্ট্রোল', defaultLabel: 'Manage Stock' }
+    'ADMIN_STOCK_MGMT': { name: '📦 ADMIN: Manage Stock', defaultMsg: 'প্যাকেজের স্টক ইন/আউট কন্ট্রোল', defaultLabel: 'Manage Stock' },
+    'ADMIN_SEARCH': { name: '🔍 ADMIN: Search Order / User', defaultMsg: 'ইউজার বা অর্ডার সার্চ প্যানেল', defaultLabel: 'Search Order / User' },
+    'ADMIN_VIP': { name: '👑 ADMIN: Top VIP Buyers', defaultMsg: 'টপ ভিআইপি ক্রেতাদের তালিকা', defaultLabel: 'Top VIP Buyers' },
+    'ADMIN_BACKUP': { name: '💾 ADMIN: Full DB Backup', defaultMsg: 'ডাটাবেজ ব্যাকআপ ফাইল তৈরি', defaultLabel: 'Full DB Backup' }
 };
 
 async function showCustomizeItemCard(ctx, itemKey) {
@@ -4517,7 +4646,7 @@ bot.action('admin_add_balance', async (ctx) => {
     await ctx.answerCbQuery();
     const adminId = ctx.from.id.toString();
     await updateAdminSession(adminId, { step: 'waiting_for_add_balance' });
-    return ctx.reply("➕ *Add User Balance*\n\nইউজার ID এবং টাকার পরিমাণ স্পেস দিয়ে লিখে পাঠান:\n*(ফরম্যাট: `User_ID Amount` - যেমন: `1262396547 500`)*", { parse_mode: 'Markdown' });
+    return ctx.reply("➕ *Add User Balance*\n\nইউজার ID এবং টাকার পরিমাণ স্পেস দিয়ে লিখে পাঠান:\n*(ফরম্যাট: `User_ID Amount` - যেমন: `8929349073 500`)*", { parse_mode: 'Markdown' });
 });
 
 bot.action('admin_remove_balance', async (ctx) => {
@@ -4525,7 +4654,7 @@ bot.action('admin_remove_balance', async (ctx) => {
     await ctx.answerCbQuery();
     const adminId = ctx.from.id.toString();
     await updateAdminSession(adminId, { step: 'waiting_for_remove_balance' });
-    return ctx.reply("➖ *Remove User Balance*\n\nইউজার ID এবং টাকার পরিমাণ স্পেস দিয়ে লিখে পাঠান:\n*(ফরম্যাট: `User_ID Amount` - যেমন: `1262396547 100`)*", { parse_mode: 'Markdown' });
+    return ctx.reply("➖ *Remove User Balance*\n\nইউজার ID এবং টাকার পরিমাণ স্পেস দিয়ে লিখে পাঠান:\n*(ফরম্যাট: `User_ID Amount` - যেমন: `8929349073 100`)*", { parse_mode: 'Markdown' });
 });
 
 bot.action('admin_pending_orders', async (ctx) => {
