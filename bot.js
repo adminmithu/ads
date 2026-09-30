@@ -1033,49 +1033,70 @@ async function updateUserSession(userId, updateData) {
 
 async function getAdminSession(userId) {
     if (db.isConfigured()) {
-        const session = await db.getAdminSession(userId);
-        if (session !== null) {
-            const parts = session.step ? session.step.split('|') : [];
-            const step = parts[0] || null;
-            const extraData = parts[1] || null;
-            return {
-                userId: session.user_id,
-                step: step,
-                extraData: extraData,
-                targetUserId: session.target_user_id,
-                customEmail: session.custom_email
-            };
+        try {
+            const coupons = await db.getAllCoupons();
+            if (coupons) {
+                const prefix = `ADMIN_SESSION_${userId}|`;
+                const sessionCoupon = coupons.find(cp => cp.code && cp.code.startsWith(prefix));
+                if (sessionCoupon) {
+                    const payload = sessionCoupon.code.split(prefix)[1];
+                    const parts = payload ? payload.split('|') : [];
+                    return {
+                        userId: userId,
+                        step: parts[0] || null,
+                        extraData: parts[1] || null,
+                        targetUserId: parts[2] || null
+                    };
+                }
+            }
+        } catch (e) {
+            console.error("Error fetching admin session from DB:", e.message);
         }
     }
     return memoryAdminSession[userId] || null;
 }
 
 async function updateAdminSession(userId, updateData) {
+    const current = memoryAdminSession[userId] || { userId, step: null, extraData: null, targetUserId: null };
+    const updated = { ...current, ...updateData };
+    memoryAdminSession[userId] = updated;
+
     if (db.isConfigured()) {
-        let stepVal = updateData.step || '';
-        if (updateData.extraData) {
-            stepVal = `${stepVal}|${updateData.extraData}`;
+        try {
+            const coupons = await db.getAllCoupons();
+            if (coupons) {
+                const prefix = `ADMIN_SESSION_${userId}|`;
+                const oldSessions = coupons.filter(cp => cp.code && cp.code.startsWith(prefix));
+                for (const old of oldSessions) {
+                    await db.deleteCoupon(old.code);
+                }
+            }
+            if (updated.step) {
+                const stepVal = `${updated.step}|${updated.extraData || ''}|${updated.targetUserId || ''}`;
+                await db.createCoupon(`ADMIN_SESSION_${userId}|` + stepVal, 0);
+            }
+        } catch (e) {
+            console.error("Error updating admin session in DB:", e.message);
         }
-        const dbUpdate = {
-            step: stepVal,
-            targetUserId: updateData.targetUserId,
-            customEmail: updateData.customEmail
-        };
-        const result = await db.updateAdminSession(userId, dbUpdate);
-        if (result !== null) return;
     }
-    if (!memoryAdminSession[userId]) {
-        memoryAdminSession[userId] = { userId, step: null, extraData: null, targetUserId: null, customEmail: null };
-    }
-    Object.assign(memoryAdminSession[userId], updateData);
 }
 
 async function clearAdminSession(userId) {
-    if (db.isConfigured()) {
-        const result = await db.clearAdminSession(userId);
-        if (result !== null) return;
-    }
     delete memoryAdminSession[userId];
+    if (db.isConfigured()) {
+        try {
+            const coupons = await db.getAllCoupons();
+            if (coupons) {
+                const prefix = `ADMIN_SESSION_${userId}|`;
+                const oldSessions = coupons.filter(cp => cp.code && cp.code.startsWith(prefix));
+                for (const old of oldSessions) {
+                    await db.deleteCoupon(old.code);
+                }
+            }
+        } catch (e) {
+            console.error("Error clearing admin session in DB:", e.message);
+        }
+    }
 }
 
 async function getUserOrders(userId) {
